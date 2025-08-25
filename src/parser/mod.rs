@@ -253,14 +253,136 @@ fn get_line_column(source: &str, offset: u32) -> (u32, u32) {
 }
 
 /// Extracts trivia information from the source code
-fn extract_trivia(_source: &str, _program: &Program) -> Trivia {
-    // TODO: Implement trivia extraction
-    // This is a placeholder implementation
+fn extract_trivia(source: &str, _program: &Program) -> Trivia {
+    let mut line_comments = Vec::new();
+    let mut block_comments = Vec::new();
+    let mut leading_whitespace = Vec::new();
+    let mut trailing_whitespace = Vec::new();
+    
+    let mut pos = 0;
+    let chars: Vec<char> = source.chars().collect();
+    let mut in_string = false;
+    let mut string_delimiter = '\0';
+    let mut escaped = false;
+    
+    while pos < chars.len() {
+        let ch = chars[pos];
+        
+        // Handle string context
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == string_delimiter {
+                in_string = false;
+                string_delimiter = '\0';
+            }
+            pos += 1;
+            continue;
+        }
+        
+        match ch {
+            // Start of string
+            '"' | '\'' | '`' => {
+                in_string = true;
+                string_delimiter = ch;
+                pos += 1;
+            }
+            // Handle line comments (only when not in string)
+            '/' if pos + 1 < chars.len() && chars[pos + 1] == '/' => {
+                let start = pos;
+                pos += 2; // Skip '//'
+                
+                // Extract comment text until end of line
+                let mut comment_text = String::new();
+                while pos < chars.len() && chars[pos] != '\n' {
+                    comment_text.push(chars[pos]);
+                    pos += 1;
+                }
+                
+                line_comments.push(Comment {
+                    text: comment_text.trim().to_string(),
+                    span: SourceSpan {
+                        start: start as u32,
+                        end: pos as u32,
+                    },
+                    kind: CommentKind::Line,
+                });
+                
+                if pos < chars.len() {
+                    pos += 1; // Skip newline
+                }
+            }
+            // Handle block comments (only when not in string)
+            '/' if pos + 1 < chars.len() && chars[pos + 1] == '*' => {
+                let start = pos;
+                pos += 2; // Skip '/*'
+                
+                let mut comment_text = String::new();
+                let mut found_end = false;
+                
+                while pos + 1 < chars.len() {
+                    if chars[pos] == '*' && chars[pos + 1] == '/' {
+                        pos += 2; // Skip '*/'
+                        found_end = true;
+                        break;
+                    }
+                    comment_text.push(chars[pos]);
+                    pos += 1;
+                }
+                
+                if found_end {
+                    block_comments.push(Comment {
+                        text: comment_text.trim().to_string(),
+                        span: SourceSpan {
+                            start: start as u32,
+                            end: pos as u32,
+                        },
+                        kind: CommentKind::Block,
+                    });
+                }
+            }
+            // Handle whitespace
+            ' ' | '\t' | '\r' | '\n' => {
+                let start = pos;
+                let mut whitespace_text = String::new();
+                
+                // Collect consecutive whitespace
+                while pos < chars.len() && matches!(chars[pos], ' ' | '\t' | '\r' | '\n') {
+                    whitespace_text.push(chars[pos]);
+                    pos += 1;
+                }
+                
+                // Determine if it's leading or trailing based on context
+                // For simplicity, consider whitespace at start of line as leading
+                let is_leading = whitespace_text.contains('\n') || start == 0;
+                
+                let whitespace = Whitespace {
+                    text: whitespace_text,
+                    span: SourceSpan {
+                        start: start as u32,
+                        end: pos as u32,
+                    },
+                };
+                
+                if is_leading {
+                    leading_whitespace.push(whitespace);
+                } else {
+                    trailing_whitespace.push(whitespace);
+                }
+            }
+            _ => {
+                pos += 1;
+            }
+        }
+    }
+    
     Trivia {
-        line_comments: Vec::new(),
-        block_comments: Vec::new(),
-        leading_whitespace: Vec::new(),
-        trailing_whitespace: Vec::new(),
+        line_comments,
+        block_comments,
+        leading_whitespace,
+        trailing_whitespace,
     }
 }
 

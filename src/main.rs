@@ -254,7 +254,10 @@ fn compile_file(file_path: &PathBuf, config: &CompilerConfig) -> CompilerResult<
     }
     
     // Parse the JavaScript file
-    let parser_config = parser::ParserConfig::default();
+    let parser_config = parser::ParserConfig {
+        preserve_trivia: config.verbose, // Enable trivia preservation in verbose mode
+        ..parser::ParserConfig::default()
+    };
     let parse_result = parser::parse_js(&source_code, &file_path.to_string_lossy(), &parser_config);
     
     if config.verbose {
@@ -282,6 +285,32 @@ fn compile_file(file_path: &PathBuf, config: &CompilerConfig) -> CompilerResult<
         println!("📊 AST Statistics:");
         println!("   📋 Statements: {}", ast.body.len());
         println!("   📘 Source type: {:?}", ast.source_type);
+        
+        // Display trivia information if available
+        if let Some(ref trivia) = parse_result.trivia {
+            println!("📝 Trivia Preserved:");
+            println!("   💬 Line comments: {}", trivia.line_comments.len());
+            println!("   💬 Block comments: {}", trivia.block_comments.len());
+            println!("   ⬜ Leading whitespace: {}", trivia.leading_whitespace.len());
+            println!("   ⬜ Trailing whitespace: {}", trivia.trailing_whitespace.len());
+            
+            // Show first few comments for debugging
+            if !trivia.line_comments.is_empty() {
+                println!("   🗺 Sample line comments:");
+                for (i, comment) in trivia.line_comments.iter().take(3).enumerate() {
+                    println!("     {}. '{}' (pos: {}-{})", 
+                        i + 1, comment.text, comment.span.start, comment.span.end);
+                }
+            }
+            
+            if !trivia.block_comments.is_empty() {
+                println!("   🗺 Sample block comments:");
+                for (i, comment) in trivia.block_comments.iter().take(3).enumerate() {
+                    println!("     {}. '{}' (pos: {}-{})", 
+                        i + 1, comment.text, comment.span.start, comment.span.end);
+                }
+            }
+        }
         
         // Pretty print AST in JSON format for debugging
         if let Ok(ast_json) = serde_json::to_string_pretty(&ast) {

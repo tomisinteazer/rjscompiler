@@ -5,8 +5,9 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::parser::{parse_js, ParserConfig, ParseError};
+    use crate::parser::{parse_js, ParserConfig};
     use crate::parser::ast_types::*;
+    use crate::parser::{CommentKind};
 
     /// Helper function to create default parser config
     fn default_config() -> ParserConfig {
@@ -568,6 +569,178 @@ mod tests {
             
             // Should handle deep nesting without stack overflow
             assert!(duration.as_secs() < 5, "Deep nesting parsing took too long: {:?}", duration);
+        }
+    }
+
+    mod trivia_tests {
+        use super::*;
+
+        #[test]
+        fn test_line_comments_preservation() {
+            let source = "// This is a line comment\nlet x = 5; // Another comment";
+            let config = ParserConfig {
+                preserve_trivia: true,
+                ..ParserConfig::default()
+            };
+            let result = parse_js(source, "test.js", &config);
+            
+            assert!(result.errors.is_empty());
+            assert!(result.trivia.is_some());
+            
+            let trivia = result.trivia.unwrap();
+            assert_eq!(trivia.line_comments.len(), 2);
+            
+            assert_eq!(trivia.line_comments[0].text, "This is a line comment");
+            assert!(matches!(trivia.line_comments[0].kind, CommentKind::Line));
+            
+            assert_eq!(trivia.line_comments[1].text, "Another comment");
+            assert!(matches!(trivia.line_comments[1].kind, CommentKind::Line));
+        }
+
+        #[test]
+        fn test_block_comments_preservation() {
+            let source = "/* This is a block comment */\nlet x = 5;";
+            let config = ParserConfig {
+                preserve_trivia: true,
+                ..ParserConfig::default()
+            };
+            let result = parse_js(source, "test.js", &config);
+            
+            assert!(result.errors.is_empty());
+            assert!(result.trivia.is_some());
+            
+            let trivia = result.trivia.unwrap();
+            assert_eq!(trivia.block_comments.len(), 1);
+            
+            assert_eq!(trivia.block_comments[0].text, "This is a block comment");
+            assert!(matches!(trivia.block_comments[0].kind, CommentKind::Block));
+        }
+
+        #[test]
+        fn test_multiline_block_comments() {
+            let source = "/*\n * Multi-line\n * block comment\n */\nlet x = 5;";
+            let config = ParserConfig {
+                preserve_trivia: true,
+                ..ParserConfig::default()
+            };
+            let result = parse_js(source, "test.js", &config);
+            
+            assert!(result.errors.is_empty());
+            assert!(result.trivia.is_some());
+            
+            let trivia = result.trivia.unwrap();
+            assert_eq!(trivia.block_comments.len(), 1);
+            
+            let comment_text = &trivia.block_comments[0].text;
+            assert!(comment_text.contains("Multi-line"));
+            assert!(comment_text.contains("block comment"));
+        }
+
+        #[test]
+        fn test_whitespace_preservation() {
+            let source = "  \n  let x = 5;    \n";
+            let config = ParserConfig {
+                preserve_trivia: true,
+                ..ParserConfig::default()
+            };
+            let result = parse_js(source, "test.js", &config);
+            
+            assert!(result.errors.is_empty());
+            assert!(result.trivia.is_some());
+            
+            let trivia = result.trivia.unwrap();
+            assert!(!trivia.leading_whitespace.is_empty() || !trivia.trailing_whitespace.is_empty());
+        }
+
+        #[test]
+        fn test_mixed_comments_and_code() {
+            let source = r#"
+            // Header comment
+            function test() {
+                /* Function body comment */
+                return 42; // Return comment
+            }
+            // Footer comment
+            "#;
+            
+            let config = ParserConfig {
+                preserve_trivia: true,
+                ..ParserConfig::default()
+            };
+            let result = parse_js(source, "test.js", &config);
+            
+            assert!(result.errors.is_empty());
+            assert!(result.trivia.is_some());
+            
+            let trivia = result.trivia.unwrap();
+            
+            // Should have both line and block comments
+            assert!(!trivia.line_comments.is_empty());
+            assert!(!trivia.block_comments.is_empty());
+            
+            // Check specific comments
+            let line_comment_texts: Vec<_> = trivia.line_comments.iter()
+                .map(|c| c.text.as_str())
+                .collect();
+            assert!(line_comment_texts.contains(&"Header comment"));
+            assert!(line_comment_texts.contains(&"Return comment"));
+            assert!(line_comment_texts.contains(&"Footer comment"));
+            
+            let block_comment_texts: Vec<_> = trivia.block_comments.iter()
+                .map(|c| c.text.as_str())
+                .collect();
+            assert!(block_comment_texts.contains(&"Function body comment"));
+        }
+
+        #[test]
+        fn test_trivia_disabled() {
+            let source = "// Comment\nlet x = 5;";
+            let config = ParserConfig {
+                preserve_trivia: false,
+                ..ParserConfig::default()
+            };
+            let result = parse_js(source, "test.js", &config);
+            
+            assert!(result.errors.is_empty());
+            assert!(result.trivia.is_none());
+        }
+
+        #[test]
+        fn test_comment_positions() {
+            let source = "// Comment at position 0\nlet x = 5;";
+            let config = ParserConfig {
+                preserve_trivia: true,
+                ..ParserConfig::default()
+            };
+            let result = parse_js(source, "test.js", &config);
+            
+            assert!(result.errors.is_empty());
+            let trivia = result.trivia.unwrap();
+            
+            assert_eq!(trivia.line_comments.len(), 1);
+            let comment = &trivia.line_comments[0];
+            
+            // Comment should start at position 0
+            assert_eq!(comment.span.start, 0);
+            // Comment should end before the newline
+            assert!(comment.span.end > 0);
+        }
+
+        #[test]
+        fn test_nested_comments_in_strings() {
+            // Comments inside strings should not be extracted as comments
+            let source = r#"let str = "// This is not a comment";"#;
+            let config = ParserConfig {
+                preserve_trivia: true,
+                ..ParserConfig::default()
+            };
+            let result = parse_js(source, "test.js", &config);
+            
+            assert!(result.errors.is_empty());
+            let trivia = result.trivia.unwrap();
+            
+            // Should not find any comments since it's inside a string
+            assert_eq!(trivia.line_comments.len(), 0);
         }
     }
 }
