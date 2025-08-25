@@ -34,6 +34,7 @@ pub struct RecoveryContext {
 }
 
 /// Error recovery engine
+#[allow(dead_code)]
 pub struct ErrorRecovery {
     /// Maximum number of errors to recover from
     max_errors: usize,
@@ -43,6 +44,7 @@ pub struct ErrorRecovery {
     recovery_history: Vec<RecoveryContext>,
 }
 
+#[allow(dead_code)]
 impl ErrorRecovery {
     /// Create a new error recovery engine
     pub fn new(max_errors: usize) -> Self {
@@ -135,6 +137,7 @@ pub struct RecoveryStats {
 }
 
 /// Helper function to find the next statement boundary
+#[allow(dead_code)]
 pub fn find_next_statement_boundary(source: &str, offset: usize) -> Option<usize> {
     let chars: Vec<char> = source.chars().collect();
     let mut i = offset;
@@ -164,6 +167,7 @@ pub fn find_next_statement_boundary(source: &str, offset: usize) -> Option<usize
 }
 
 /// Helper function to find the next expression boundary
+#[allow(dead_code)]
 pub fn find_next_expression_boundary(source: &str, offset: usize) -> Option<usize> {
     let chars: Vec<char> = source.chars().collect();
     let mut i = offset;

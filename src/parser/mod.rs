@@ -232,6 +232,7 @@ fn convert_parser_result(
 }
 
 /// Calculates line and column numbers from a byte offset
+#[allow(dead_code)]
 fn get_line_column(source: &str, offset: u32) -> (u32, u32) {
     let mut line = 1;
     let mut column = 1;
@@ -387,6 +388,7 @@ fn extract_trivia(source: &str, _program: &Program) -> Trivia {
 }
 
 /// Helper function to create a simple syntax error
+#[allow(dead_code)]
 pub fn create_syntax_error(message: &str, line: u32, column: u32) -> ParseError {
     ParseError::SyntaxError {
         message: message.to_string(),
@@ -397,6 +399,7 @@ pub fn create_syntax_error(message: &str, line: u32, column: u32) -> ParseError 
 }
 
 /// Helper function to create an unexpected token error
+#[allow(dead_code)]
 pub fn create_unexpected_token_error(token: &str, line: u32, column: u32) -> ParseError {
     ParseError::UnexpectedToken {
         token: token.to_string(),
@@ -406,6 +409,7 @@ pub fn create_unexpected_token_error(token: &str, line: u32, column: u32) -> Par
 }
 
 /// Helper function to create an unterminated string error
+#[allow(dead_code)]
 pub fn create_unterminated_string_error(line: u32, column: u32) -> ParseError {
     ParseError::UnterminatedString { line, column }
 }

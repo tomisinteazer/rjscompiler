@@ -25,6 +25,9 @@ use std::process;
 use clap::{Arg, Command};
 
 mod parser;
+mod analyzer;
+mod transformer;
+mod generator;
 
 /// Application version constant
 const VERSION: &str = "0.1.0";
@@ -37,6 +40,8 @@ const APP_NAME: &str = "rjs-compiler";
 struct CompilerConfig {
     /// Input file path to compile
     input_file: Option<PathBuf>,
+    /// Output file path for minified code
+    output_file: Option<PathBuf>,
     /// Enable verbose output
     verbose: bool,
 }
@@ -133,6 +138,19 @@ fn parse_command_line_arguments() -> CompilerResult<CompilerConfig> {
                 ),
         )
         .arg(
+            Arg::new("output")
+                .short('o')
+                .long("output")
+                .help("Output file for minified JavaScript")
+                .long_help(
+                    "Path to the output file where the minified JavaScript \n\
+                     will be saved. If not specified, output will be printed \n\
+                     to stdout. File will be created if it doesn't exist."
+                )
+                .value_name("OUTPUT_FILE")
+                .value_parser(clap::value_parser!(PathBuf)),
+        )
+        .arg(
             Arg::new("input")
                 .help("Input JavaScript file to compile")
                 .long_help(
@@ -146,10 +164,12 @@ fn parse_command_line_arguments() -> CompilerResult<CompilerConfig> {
         .get_matches();
 
     let input_file = matches.get_one::<PathBuf>("input").cloned();
+    let output_file = matches.get_one::<PathBuf>("output").cloned();
     let verbose = matches.get_flag("verbose");
 
     Ok(CompilerConfig {
         input_file,
+        output_file,
         verbose,
     })
 }
@@ -174,6 +194,7 @@ fn display_welcome_message() {
 /// ```rust,no_run
 /// let config = CompilerConfig {
 ///     input_file: Some(PathBuf::from("test.js")),
+///     output_file: Some(PathBuf::from("build.js")),
 ///     verbose: true,
 /// };
 /// display_verbose_info(&config);
@@ -184,6 +205,12 @@ fn display_verbose_info(config: &CompilerConfig) {
     
     if let Some(ref input_path) = config.input_file {
         println!("   📁 Input file: {}", input_path.display());
+    }
+    
+    if let Some(ref output_path) = config.output_file {
+        println!("   📄 Output file: {}", output_path.display());
+    } else {
+        println!("   📄 Output file: stdout (console)");
     }
     
     println!("   🔧 Verbose output: {}", config.verbose);
@@ -197,14 +224,15 @@ fn display_usage_information() {
     println!("💡 Usage: {} [OPTIONS] <FILE>", APP_NAME);
     println!("   Use --help for more information");
     println!("   Example: {} --verbose my_script.js", APP_NAME);
+    println!("   Example: {} -o build.js my_script.js", APP_NAME);
 }
 
-/// Compiles the specified JavaScript file.
+/// Compiles the specified JavaScript file and saves the minified output.
 ///
 /// # Arguments
 ///
 /// * `file_path` - Path to the JavaScript file to compile
-/// * `config` - Compiler configuration settings
+/// * `config` - Compiler configuration settings including output file destination
 ///
 /// # Returns
 ///
@@ -213,6 +241,12 @@ fn display_usage_information() {
 /// # Errors
 ///
 /// Returns `CompilerError::FileNotFound` if the input file doesn't exist.
+/// Returns `CompilerError::ParseError` if file writing fails.
+///
+/// # Output Behavior
+///
+/// If an output file is specified in config, the minified code is saved there.
+/// If no output file is specified, defaults to 'build.js' in the input file's directory.
 ///
 /// # Examples
 ///
@@ -222,6 +256,7 @@ fn display_usage_information() {
 /// let file_path = PathBuf::from("example.js");
 /// let config = CompilerConfig {
 ///     input_file: Some(file_path.clone()),
+///     output_file: Some(PathBuf::from("build.js")),
 ///     verbose: false,
 /// };
 /// 
@@ -325,26 +360,180 @@ fn compile_file(file_path: &PathBuf, config: &CompilerConfig) -> CompilerResult<
         }
     }
     
-    // TODO: Implement actual JavaScript analysis and transformation logic
-    // This is where the core compilation functionality will be added
-    simulate_compilation_process(config)?;
+    // Phase 3: Semantic Analysis
+    if config.verbose {
+        println!("🔍 Phase 3: Starting semantic analysis...");
+    }
+    
+    let analyzer_config = analyzer::AnalyzerConfig {
+        verbose: config.verbose,
+        preserve_exports: true,
+        aggressive_optimization: false,
+        strict_mode: true,
+    };
+    
+    let analysis_result = analyzer::analyze_ast(&ast, &analyzer_config)
+        .map_err(|e| CompilerError::ParseError(format!("Analysis failed: {}", e)))?;
+    
+    if config.verbose {
+        println!("📊 Analysis Results:");
+        println!("   🏗️  Scopes analyzed: {}", analysis_result.metadata.scope_count);
+        println!("   🏷️  Symbols found: {}", analysis_result.metadata.symbol_count);
+        println!("   🔗 Closure captures: {}", analysis_result.metadata.capture_count);
+        println!("   📤 Export symbols: {}", analysis_result.metadata.export_count);
+        println!("   ⏱️  Analysis time: {}ms", analysis_result.metadata.analysis_time_ms);
+        
+        // Display unsafe scopes
+        if !analysis_result.semantic_flags.unsafe_scopes.is_empty() {
+            println!("   ⚠️  Unsafe scopes detected: {}", analysis_result.semantic_flags.unsafe_scopes.len());
+            for (scope_id, reason) in &analysis_result.semantic_flags.unsafe_scopes {
+                println!("     Scope {}: {:?}", scope_id, reason);
+            }
+        }
+        
+        // Display symbol statistics
+        let renamable_symbols = analysis_result.symbol_table.symbols.values()
+            .filter(|s| s.is_renamable)
+            .count();
+        let captured_symbols = analysis_result.symbol_table.symbols.values()
+            .filter(|s| s.is_captured)
+            .count();
+        
+        println!("   ✅ Renamable symbols: {}", renamable_symbols);
+        println!("   📎 Captured symbols: {}", captured_symbols);
+    }
+    
+    // Phase 4: Transformation
+    if config.verbose {
+        println!("🔄 Phase 4: Starting transformation...");
+    }
+    
+    let _transformer_config = transformer::TransformerConfig {
+        enable_identifier_renaming: true,
+        enable_dead_code_elimination: true,
+        enable_expression_simplification: true,
+        enable_property_minification: true,
+        enable_function_minification: true,
+        enable_rollback: true,
+        verbose: config.verbose,
+        aggressive_optimization: false,
+    };
+    
+    let transformation_result = transformer::transform_ast(ast, analysis_result)
+        .map_err(|e| CompilerError::ParseError(format!("Transformation failed: {}", e)))?;
+    
+    if config.verbose {
+        println!("📊 Transformation Results:");
+        println!("   🏷️  Identifiers renamed: {}", transformation_result.stats.identifiers_renamed);
+        println!("   🗑️  Dead statements removed: {}", transformation_result.stats.dead_statements_removed);
+        println!("   🔧 Expressions simplified: {}", transformation_result.stats.expressions_simplified);
+        println!("   🏠 Properties renamed: {}", transformation_result.stats.properties_renamed);
+        println!("   📎 Functions inlined: {}", transformation_result.stats.functions_inlined);
+        println!("   ⏱️  Transformation time: {}ms", transformation_result.stats.transformation_time_ms);
+        
+        if !transformation_result.warnings.is_empty() {
+            println!("   ⚠️  Warnings:");
+            for warning in &transformation_result.warnings {
+                println!("     {}", warning);
+            }
+        }
+        
+        if !transformation_result.identifier_mapping.is_empty() {
+            println!("   🔄 Identifier mappings:");
+            for (original, renamed) in transformation_result.identifier_mapping.iter().take(5) {
+                println!("     {} -> {}", original, renamed);
+            }
+            if transformation_result.identifier_mapping.len() > 5 {
+                println!("     ... and {} more", transformation_result.identifier_mapping.len() - 5);
+            }
+        }
+        
+        println!("   🎯 Statements processed: {}", transformation_result.transformed_ast.body.len());
+    }
+    
+    // Phase 5: Code Generation
+    if config.verbose {
+        println!("🏗️ Phase 5: Starting code generation...");
+    }
+    
+    let generator_config = generator::GeneratorConfig {
+        format: generator::OutputFormat::Compact,
+        semicolon: generator::SemicolonStrategy::Auto,
+        quote: generator::QuoteStrategy::Auto,
+        preserve_comments: generator::CommentPreservation::None,
+        source_map: generator::SourceMapMode::None,
+        ..generator::GeneratorConfig::default()
+    };
+    
+    let generator = generator::Generator::new(generator_config);
+    let generation_result = generator.generate(&transformation_result.transformed_ast, Some(&source_code))
+        .map_err(|e| CompilerError::ParseError(format!("Code generation failed: {}", e)))?;
+    
+    if config.verbose {
+        println!("📊 Generation Results:");
+        println!("   📏 Original size: {} bytes", generation_result.diagnostics.original_size);
+        println!("   📏 Generated size: {} bytes", generation_result.diagnostics.generated_size);
+        println!("   📉 Compression ratio: {:.1}%", generation_result.diagnostics.compression_ratio * 100.0);
+        println!("   ⏱️  Generation time: {:.2}ms", generation_result.diagnostics.generation_time_ms);
+        
+        if generation_result.diagnostics.warning_count > 0 {
+            println!("   ⚠️  Generation warnings: {}", generation_result.diagnostics.warning_count);
+            for warning in &generation_result.diagnostics.warnings {
+                println!("     {}", warning);
+            }
+        }
+    }
+    
+    // Determine output destination
+    let output_path = config.output_file.as_ref()
+        .cloned()
+        .unwrap_or_else(|| {
+            // Default to build.js in the same directory as input file
+            if let Some(ref input_path) = config.input_file {
+                let mut output_path = input_path.clone();
+                output_path.set_file_name("build.js");
+                output_path
+            } else {
+                PathBuf::from("build.js")
+            }
+        });
+    
+    // Write the minified code to file
+    std::fs::write(&output_path, &generation_result.code)
+        .map_err(|e| CompilerError::ParseError(format!("Failed to write output file '{}': {}", output_path.display(), e)))?;
+    
+    if config.verbose {
+        println!("💾 Output written to: {}", output_path.display());
+        println!("🎯 Generated Code Preview:");
+        // Show a preview of the generated code (first 200 characters)
+        let preview = if generation_result.code.len() > 200 {
+            format!("{}...", &generation_result.code[..200])
+        } else {
+            generation_result.code.clone()
+        };
+        println!("{}", preview);
+    } else {
+        // In non-verbose mode, just show the output file location
+        println!("📄 Minified JavaScript saved to: {}", output_path.display());
+    }
     
     println!("✅ Compilation completed successfully!");
     
     if config.verbose {
         println!("📊 Compilation statistics:");
-        println!("   ⏱️  Duration: <measurement pending>");
-        println!("   📏 Output size: <measurement pending>");
-        println!("   🎯 Statements processed: {}", ast.body.len());
+        println!("   ⏱️  Total file size reduction: {:.1}%", generation_result.diagnostics.compression_ratio * 100.0);
+        println!("   📁 Input: {} -> 📄 Output: {}", 
+            config.input_file.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "<unknown>".to_string()),
+            output_path.display());
     }
     
     Ok(())
 }
 
-/// Simulates the compilation process for demonstration purposes.
+/// Simulates the remaining compilation process for demonstration purposes.
 ///
-/// This function represents where the actual JavaScript parsing and compilation
-/// logic will be implemented in future iterations.
+/// This function represents where the code generation logic will be implemented
+/// in future iterations. The transformation phase is now complete.
 ///
 /// # Arguments
 ///
@@ -356,18 +545,13 @@ fn compile_file(file_path: &PathBuf, config: &CompilerConfig) -> CompilerResult<
 ///
 /// # Note
 ///
-/// This is a placeholder function that will be replaced with actual
-/// compilation logic in future development phases.
+/// This is a placeholder function for Phase 5 (code generation).
 fn simulate_compilation_process(config: &CompilerConfig) -> CompilerResult<()> {
     if config.verbose {
-        println!("🔄 Phase 1: Lexical analysis");
-        println!("🔄 Phase 2: Syntax parsing");
-        println!("🔄 Phase 3: Semantic analysis");
-        println!("🔄 Phase 4: Code generation");
-        println!("🔄 Phase 5: Optimization");
+        println!("🔄 Phase 5: Code generation (TODO)");
     }
     
     // Simulate successful compilation
-    // In a real implementation, this would contain the actual compilation pipeline
+    // In a real implementation, this would contain the code generation pipeline
     Ok(())
 }

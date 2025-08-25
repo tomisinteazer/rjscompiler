@@ -253,6 +253,8 @@ pub enum Expression {
         consequent: Box<Expression>,
         alternate: Box<Expression>,
     },
+    /// This expression
+    ThisExpression,
 }
 
 /// Function expression
@@ -402,6 +404,25 @@ pub struct RegExpLiteral {
     pub flags: String,
 }
 
+/// Unary operators
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum UnaryOperator {
+    /// Logical not (!)
+    LogicalNot,
+    /// Bitwise not (~)
+    BitwiseNot,
+    /// Unary plus (+)
+    Plus,
+    /// Unary minus (-)
+    Minus,
+    /// typeof operator
+    Typeof,
+    /// void operator
+    Void,
+    /// delete operator
+    Delete,
+}
+
 /// Binary operators
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum BinaryOperator {
@@ -429,18 +450,6 @@ pub enum BinaryOperator {
     LogicalOr,
     In,
     Instanceof,
-}
-
-/// Unary operators
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum UnaryOperator {
-    Plus,
-    Minus,
-    LogicalNot,
-    BitwiseNot,
-    Typeof,
-    Void,
-    Delete,
 }
 
 /// Assignment operators
